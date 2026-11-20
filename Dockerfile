@@ -1,0 +1,11 @@
+FROM python:3.12-slim
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+WORKDIR /service
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app/ app/
+COPY alembic.ini .
+COPY migrations/ migrations/
+COPY tests/ tests/
+USER nobody
+CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]

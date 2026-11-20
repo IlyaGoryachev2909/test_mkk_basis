@@ -1,0 +1,69 @@
+x-app: &app
+  image: ${COMPOSE_PROJECT_NAME:-payment-service}-app:local
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: payments
+      POSTGRES_PASSWORD: payments
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "payments", "-d", "payments"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    hostname: rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: payments
+      RABBITMQ_DEFAULT_PASS: payments
+    volumes:
+      - rabbitdata:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  api:
+    <<: *app
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://payments:payments@postgres/payments
+      API_KEY: ${API_KEY:-local-demo-key}
+    command: ["sh", "-ec", "alembic upgrade head && exec uvicorn app.api:app --host 0.0.0.0 --port 8000"]
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1',8000), 2).close()"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  consumer:
+    <<: *app
+    pull_policy: never
+    environment:
+      DATABASE_URL: postgresql+asyncpg://payments:payments@postgres/payments
+      AMQP_URL: amqp://payments:payments@rabbitmq/
+    command: ["python", "-m", "app.consumer"]
+    depends_on:
+      api:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  rabbitdata:
